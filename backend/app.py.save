@@ -1,0 +1,413 @@
+from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from flask_cors import CORS
+from datetime import datetime, timedelta
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+app = Flask(__name__)
+CORS(app)
+
+# Configuration
+app.config['SQLALCHEMY_DATABASE_URI'] = f"postgresql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST', 'localhost')}/{os.getenv('DB_NAME')}"
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'super-secret-key-change-in-production')
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=8)
+
+db = SQLAlchemy(app)
+jwt = JWTManager(app)
+
+# Database Models
+class User(db.Model):
+    __tablename__ = 'user    
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password = db.Column(db.String(200), nullable=False)
+    full_name = db.Column(db.String(100), nullable=False)
+    role = db.Column(db.String(20), nullable=False, default='user')  # 'admin' or 'user'
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    observations = db.relationship('Observation', backref='observer', lazy=True)
+
+class Observation(db.Model):
+    __tablename__ = 'observations'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text, nullable=False)
+    category = db.Column(db.String(50), nullable=False)  # 'unsafe_act', 'unsafe_condition', 'positive'
+    location = db.Column(db.String(200), nullable=False)
+    severity = db.Column(db.String(20), nullable=False)  # 'low', 'medium', 'high'
+    status = db.Column(db.String(20), nullable=False, default='open')  # 'open', 'in_progress', 'closed'
+    image_url = db.Column(db.String(500), nullable=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+# Create tables
+with app.app_context():
+    db.create_all()
+
+# Test endpoint
+@app.route('/api/test', methods=['GET'])
+def test():
+    return jsonify({"message": "API is working!"}), 200
+
+# ============= AUTH ENDPOINTS =============
+@app.route('/api/register', methods=['POST'])
+def register():
+    try:
+        data = request.get_json()
+        
+        # Validate required fields
+        required_fields = ['username', 'password', 'full_name']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({"error": f"Field {field} is required"}), 400
+        
+        # Check if username already exists
+        if User.query.filter_by(username=data['username']).first():
+            return jsonify({"error": "Username already exists"}), 400
+        
+        # Create new user (in production, hash password!)
+        new_user = User(
+            username=data['username'],
+            password=data['password'],  # TODO: Add password hashing
+            full_name=data['full_name'],
+            role=data.get('role', 'user')
+        )
+        
+        db.session.add(new_user)
+        db.session.commit()
+        
+        return jsonify(
+            "message": "User created successfully",
+            "user": {
+                "id": new_user.id,
+                "username": new_user.username,
+                "full_name": new_user.full_name,
+                "role": new_user.role
+            }
+        }), 201
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    try:
+        data = request.get_json()
+        
+        # Validate required fields
+        if not data or not data.get('username') or not data.get('password'):
+            return jsonify({"error": "Username and password required"}), 400
+        
+        # Find user
+        user = User.query.filter_by(username=data['username']).first()
+        
+        # Check password (in production, use password hashing verification)
+        if not user or user.password != data['password']:
+            return jsonify({"error": "Invalid username or password"}), 401
+        
+        # Create access token
+        access_token = create_access_token(
+            identity=str(user.id),
+            additional_claims={
+                "username": user.username,
+                "role": user.role,
+                "full_name": user.full_name
+            }
+        )
+        
+        return jsonify({
+            "access_token": access_token,
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "full_name": user.full_name,
+                "role": user.role
+            }
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/profile', methods=['GET'])
+@jwt_required()
+def profile():
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+    
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    
+    return jsonify({
+        "id": user.id,
+        "username": user.username,
+        "full_name": user.full_name,
+        "role": user.role,
+        "created_at": user.created_at.isoformat() if user.created_at else None
+    }), 200
+
+# ============= OBSERVATION ENDPOINTS =============
+@app.route('/api/observations', methods=['GET'])
+@jwt_required()
+def get_observations():
+    try:
+        # Get query parameters for filtering
+        status = request.args.get('status')
+        category = request.args.get('category')
+        severity = request.args.get('severity')
+        
+        # Base query
+        query = Observation.query
+        
+        # Apply filters
+        if category:
+            query = query.filter_by(category=category)
+        if severity:
+            query = query.filter_by(severity=severity)
+        
+        # Order by newest first
+        observations = query.order_by(Observation.created_at.desc()).all()
+        
+        result = []
+        for obs in observations:
+            observer = User.query.get(obs.created_by)
+            result.append({
+                "id": obs.id,
+                "title": obs.title,
+                "description": obs.description,
+                "category": obs.category,
+                "location": obs.location,
+                "severity": obs.severity,
+                "status": obs.status,
+                "image_url": obs.image_url,
+                "created_by": {
+                    "id": observer.id,
+                    "full_name": observer.full_name
+                },
+                "created_at": obs.created_at.isoformat() if obs.created_at else None,
+                "updated_at": obs.updated_at.isoformat() if obs.updated_at else None
+            })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/observations/<int:obs_id>', methods=['GET'])
+@jwt_required()
+def get_observation(obs_id):
+    try:
+        observation = Observation.query.get(obs_id)
+        
+        if not observation:
+            return jsonify({"error": "Observation not found"}), 404
+        
+        observer = User.query.get(observation.created_by)
+        
+        return jsonify({
+            "id": observation.id,
+            "title": observation.title,
+            "description": observation.description,
+            "category": observation.category,
+            "location": observation.location,
+            "severity": observation.severity,
+            "status": observation.status,
+            "image_url": observation.image_url,
+            "created_by": {
+                "id": observer.id,
+                "full_name": observer.full_name
+            },
+            "created_at": observation.created_at.isoformat() if observation.created_at else None,
+            "updated_at": observation.updated_at.isoformat() if observation.updated_at else None
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/observations', methods=['POST'])
+@jwt_required()
+def create_observation():
+    try:
+        data = request.get_json()
+        current_user_id = int(get_jwt_identity())
+        
+        # Validate required fields
+        required_fields = ['title', 'description', 'category', 'location', 'severity']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({"error": f"Field {field} is required"}), 400
+        
+        # Validate category
+        valid_categories = ['unsafe_act', 'unsafe_condition', 'positive']
+        if data['category'] not in valid_categories:
+            return jsonify({"error": f"Category must be one of: {valid_categories}"}), 400
+        
+        # Validate severity
+        valid_severity = ['low', 'medium', 'high']
+        if data['severity'] not in valid_severity:
+            return jsonify({"error": f"Severity must be one of: {valid_severity}"}), 400
+        
+        # Create new observation
+        new_observation = Observation(
+            title=data['title'],
+            description=data['description'],
+            category=data['category'],
+            location=data['location'],
+            severity=data['severity'],
+            status=data.get('status', 'open'),
+            image_url=data.get('image_url'),
+            created_by=current_user_id
+        )
+        
+        db.session.add(new_observation)
+        db.session.commit()
+        
+        return jsonify({
+            "message": "Observation created successfully",
+            "observation": {
+                "id": new_observation.id,
+                "title": new_observation.title,
+                "category": new_observation.category
+            }
+        }), 201
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/observations/<int:obs_id>', methods=['PUT'])
+@jwt_required()
+def update_observation(obs_id):
+    try:
+        data = request.get_json()
+        current_user_id = int(get_jwt_identity())
+        current_user = User.query.get(current_user_id)
+        
+        observation = Observation.query.get(obs_id)
+        
+        if not observation:
+            return jsonify({"error": "Observation not found"}), 404
+        
+        # Check permission (only admin or creator can update)
+        if current_user.role != 'admin' and observation.created_by != current_user_id:
+            return jsonify({"error": "Permission denied"}), 403
+        
+        # Update fields if provided
+        if 'title' in data:
+            observation.title = data['title']
+        if 'description' in data:
+            observation.description = data['description']
+        if 'category' in data:
+            valid_categories = ['unsafe_act', 'unsafe_condition', 'positive']
+            if data['category'] not in valid_categories:
+                return jsonify({"error": f"Category must be one of: {valid_categories}"}), 400
+            observation.category = data['category']
+        if 'location' in data:
+            observation.location = data['location']
+        if 'severity' in data:
+            valid_severity = ['low', 'medium', 'high']
+            if data['severity'] not in valid_severity:
+                return jsonify({"error": f"Severity must be one of: {valid_severity}"}), 400
+            observation.severity = data['severity']
+        if 'status' in data:
+            valid_status = ['open', 'in_progress', 'closed']
+            if data['status'] not in valid_status:
+                return jsonify({"error": f"Status must be one of: {valid_status}"}), 400
+            observation.status = data['status']
+        if 'image_url' in data:
+            observation.image_url = data['image_url']
+        
+        observation.updated_at = datetime.utcnow()
+        db.session.commit()
+        
+        return jsonify({
+            "message": "Observation updated successfully",
+            "observation": {
+                "id": observation.id,
+                "title": observation.title,
+                "status": observation.status
+            }
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/observations/<int:obs_id>', methods=['DELETE'])
+@jwt_required()
+def delete_observation(obs_id):
+    try:
+        current_user_id = int(get_jwt_identity())
+        current_user = User.query.get(current_user_id)
+        
+        observation = Observation.query.get(obs_id)
+        
+        if not observation:
+            return jsonify({"error": "Observation not found"}), 404
+        
+        # Check permission (only admin or creator can delete)
+        if current_user.role != 'admin' and observation.created_by != current_user_id:
+            return jsonify({"error": "Permission denied"}), 403
+        
+        db.session.delete(observation)
+        db.session.commit()
+        
+        return jsonify({"message": "Observation deleted successfully"}), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+# ============= DASHBOARD ENDPOINTS =============
+@app.route('/api/dashboard/stats', methods=['GET'])
+@jwt_required()
+def get_dashboard_stats():
+    try:
+        # Total counts
+        total_observations = Observation.query.count()
+        
+        # Count by status
+        open_count = Observation.query.filter_by(status='open').count()
+        in_progress_count = Observation.query.filter_by(status='in_progress').count()
+        closed_count = Observation.query.filter_by(status='closed').count()
+        
+        # Count by category
+        unsafe_act_count = Observation.query.filter_by(category='unsafe_act').count()
+        unsafe_condition_count = Observation.query.filter_by(category='unsafe_condition').count()
+        positive_count = Observation.query.filter_by(category='positive').count()
+        
+        # Count by severity
+        low_count = Observation.query.filter_by(severity='low').count()
+        medium_count = Observation.query.filter_by(severity='medium').count()
+        high_count = Observation.query.filter_by(severity='high').count()
+        
+        # Recent observations (last 5)
+        recent = Observation.query.order_by(Observation.created_at.desc()).limit(5).all()
+        recent_list = []
+        for obs in recent:
+            observer = User.query.get(obs.created_by)
+            recent_list.append({
+                "id": obs.id,
+                "title": obs.title,
+                "category": obs.category,
+                "status": obs.status,
+                "created_by": observer.full_name if observer else "Unknown",
+                "created_at": obs.created_at.isoformat() if obs.created_at else None
+            })
+        
+        return jsonify({
+            "total_observations": total_observations,
+            "by_status": {
+                "open": open_count,
+                "in_progress": in_progress_count,
+                "closed": closed_count
+            },
+            "by_category": {
+                "unsafe_act": unsafe_act_count,
+                "unsafe_condition": unsafe_condition_count,
+                "positive": positive_count
+            },
+    
