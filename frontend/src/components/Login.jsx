@@ -7,13 +7,16 @@ function Login({ onLogin, onSwitchToRegister }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Gunakan environment variable untuk API URL
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
     try {
-      const response = await axios.post('http://localhost:5000/api/login', {
+      const response = await axios.post(`${API_URL}/api/login`, {
         username,
         password
       });
