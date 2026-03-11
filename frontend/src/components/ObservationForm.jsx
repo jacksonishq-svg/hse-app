@@ -13,6 +13,8 @@ function ObservationForm({ onSuccess, onCancel }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
   const handleChange = (e) => {
     setFormData({
       ...formData,
@@ -28,12 +30,11 @@ function ObservationForm({ onSuccess, onCancel }) {
     try {
       const token = localStorage.getItem('token');
       await axios.post(
-        'http://localhost:5000/api/observations',
+        `${API_URL}/api/observations`,
         formData,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       
-      // Reset form
       setFormData({
         title: '',
         description: '',
@@ -43,7 +44,6 @@ function ObservationForm({ onSuccess, onCancel }) {
         status: 'open'
       });
       
-      // Panggil callback sukses
       onSuccess();
     } catch (err) {
       setError(err.response?.data?.error || 'Gagal menyimpan observasi');
@@ -63,7 +63,6 @@ function ObservationForm({ onSuccess, onCancel }) {
       )}
 
       <form onSubmit={handleSubmit}>
-        {/* Title */}
         <div className="mb-4">
           <label className="block text-gray-700 text-sm font-bold mb-2">
             Judul Observasi *
@@ -79,7 +78,6 @@ function ObservationForm({ onSuccess, onCancel }) {
           />
         </div>
 
-        {/* Description */}
         <div className="mb-4">
           <label className="block text-gray-700 text-sm font-bold mb-2">
             Deskripsi *
@@ -95,7 +93,6 @@ function ObservationForm({ onSuccess, onCancel }) {
           />
         </div>
 
-        {/* Category & Location Row */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <div>
             <label className="block text-gray-700 text-sm font-bold mb-2">
@@ -130,7 +127,6 @@ function ObservationForm({ onSuccess, onCancel }) {
           </div>
         </div>
 
-        {/* Severity & Status Row */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           <div>
             <label className="block text-gray-700 text-sm font-bold mb-2">
@@ -166,7 +162,6 @@ function ObservationForm({ onSuccess, onCancel }) {
           </div>
         </div>
 
-        {/* Buttons */}
         <div className="flex justify-end space-x-3">
           <button
             type="button"

@@ -11,6 +11,8 @@ function Register({ onRegister, onSwitchToLogin }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
   const handleChange = (e) => {
     setFormData({
       ...formData,
@@ -24,19 +26,17 @@ function Register({ onRegister, onSwitchToLogin }) {
     setError('');
 
     try {
-      await axios.post('http://localhost:5000/api/register', formData);
+      await axios.post(`${API_URL}/api/register`, formData);
       
       // Auto login setelah register
-      const loginResponse = await axios.post('http://localhost:5000/api/login', {
+      const loginResponse = await axios.post(`${API_URL}/api/login`, {
         username: formData.username,
         password: formData.password
       });
 
-      // Simpan token
       localStorage.setItem('token', loginResponse.data.access_token);
       localStorage.setItem('user', JSON.stringify(loginResponse.data.user));
 
-      // Panggil callback
       onRegister(loginResponse.data.user);
     } catch (err) {
       setError(err.response?.data?.error || 'Registrasi gagal');

@@ -14,7 +14,8 @@ function Dashboard({ user }) {
     severity: ''
   });
 
-  // Ambil data dari backend
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
   useEffect(() => {
     fetchData();
   }, [filter]);
@@ -24,7 +25,6 @@ function Dashboard({ user }) {
     try {
       const token = localStorage.getItem('token');
       
-      // Build query string untuk filter
       const queryParams = new URLSearchParams();
       if (filter.status) queryParams.append('status', filter.status);
       if (filter.category) queryParams.append('category', filter.category);
@@ -32,15 +32,13 @@ function Dashboard({ user }) {
       
       const queryString = queryParams.toString() ? `?${queryParams.toString()}` : '';
 
-      // Ambil data observasi
       const obsResponse = await axios.get(
-        `http://localhost:5000/api/observations${queryString}`,
+        `${API_URL}/api/observations${queryString}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       
-      // Ambil data stats
       const statsResponse = await axios.get(
-        'http://localhost:5000/api/dashboard/stats',
+        `${API_URL}/api/dashboard/stats`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -56,7 +54,7 @@ function Dashboard({ user }) {
 
   const handleFormSuccess = () => {
     setShowForm(false);
-    fetchData(); // Refresh data
+    fetchData();
   };
 
   const getCategoryBadge = (category) => {
@@ -126,7 +124,6 @@ function Dashboard({ user }) {
 
   return (
     <div className="space-y-6">
-      {/* Header with Add Button */}
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-gray-800">Dashboard</h2>
         <div className="flex space-x-2">
@@ -151,7 +148,6 @@ function Dashboard({ user }) {
         </div>
       </div>
 
-      {/* Stats Cards */}
       {stats && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white rounded-lg shadow p-6">
@@ -212,7 +208,6 @@ function Dashboard({ user }) {
         </div>
       )}
 
-      {/* Observation Form Modal */}
       {showForm && (
         <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
           <div className="relative top-20 mx-auto p-5 border w-full max-w-2xl shadow-lg rounded-lg bg-white">
@@ -224,7 +219,6 @@ function Dashboard({ user }) {
         </div>
       )}
 
-      {/* Filters */}
       <div className="bg-white rounded-lg shadow p-4">
         <h3 className="text-lg font-semibold text-gray-800 mb-3">Filter</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -263,7 +257,6 @@ function Dashboard({ user }) {
         </div>
       </div>
 
-      {/* Observations List */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-gray-800">Daftar Observasi</h3>
